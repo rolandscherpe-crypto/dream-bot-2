@@ -329,4 +329,42 @@ async def premium_off(interaction: discord.Interaction):
     conn.close()
 
     await interaction.response.send_message("Premium wurde deaktiviert.", ephemeral=True)
+    @tree.command(name="premium_on", description="Aktiviert Premium für diesen Server.")
+@app_commands.checks.has_permissions(administrator=True)
+async def premium_on(interaction: discord.Interaction):
+    if interaction.guild is None:
+        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
+        return
+
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO guild_settings (guild_id, premium_enabled)
+        VALUES (?, 1)
+        ON CONFLICT(guild_id) DO UPDATE SET premium_enabled=1
+    """, (interaction.guild.id,))
+    conn.commit()
+    conn.close()
+
+    await interaction.response.send_message("Premium wurde aktiviert.", ephemeral=True)
+
+
+@tree.command(name="premium_off", description="Deaktiviert Premium für diesen Server.")
+@app_commands.checks.has_permissions(administrator=True)
+async def premium_off(interaction: discord.Interaction):
+    if interaction.guild is None:
+        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
+        return
+
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO guild_settings (guild_id, premium_enabled)
+        VALUES (?, 0)
+        ON CONFLICT(guild_id) DO UPDATE SET premium_enabled=0
+    """, (interaction.guild.id,))
+    conn.commit()
+    conn.close()
+
+    await interaction.response.send_message("Premium wurde deaktiviert.", ephemeral=True)
 bot.run(TOKEN)
