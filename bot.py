@@ -165,5 +165,15 @@ async def announce_error(interaction: discord.Interaction, error):
 
 if not TOKEN:
     raise ValueError("DISCORD_TOKEN ist nicht gesetzt.")
+@bot.event
+async def on_member_join(member):
+    role_name = "Mitglied"
 
+    role = discord.utils.get(member.guild.roles, name=role_name)
+
+    if role:
+        await member.add_roles(role)
+        print(f"{member} hat die Rolle {role_name} bekommen")
+    else:
+        print("Rolle nicht gefunden!")
 bot.run(TOKEN)
