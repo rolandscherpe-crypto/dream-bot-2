@@ -260,7 +260,7 @@ async def close_ticket(interaction: discord.Interaction):
 
     await interaction.response.send_message("Ticket wird geschlossen.", ephemeral=True)
     await interaction.channel.delete()
-    @tree.command(name="kick", description="Kickt einen Benutzer.")
+@tree.command(name="kick", description="Kickt einen Benutzer.")
 @app_commands.checks.has_permissions(kick_members=True)
 async def kick_user(interaction: discord.Interaction, member: discord.Member, grund: str = "Kein Grund angegeben"):
     if interaction.guild is None:
