@@ -10,6 +10,7 @@ intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True
 intents.messages = True
+intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
@@ -70,9 +71,73 @@ def is_premium(guild_id: int) -> bool:
     return bool(row and row[2] == 1)
 
 
+class TicketView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Ticket erstellen",
+        style=discord.ButtonStyle.green,
+        custom_id="create_ticket"
+    )
+    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "Das geht nur in einem Server.",
+                ephemeral=True
+            )
+            return
+
+        guild = interaction.guild
+        user = interaction.user
+
+        category = discord.utils.get(guild.categories, name="Tickets")
+        if category is None:
+            category = await guild.create_category("Tickets")
+
+        safe_name = user.name.lower().replace(" ", "-")
+        ticket_name = f"ticket-{safe_name}"
+
+        existing_channel = discord.utils.get(guild.text_channels, name=ticket_name)
+        if existing_channel:
+            await interaction.response.send_message(
+                f"Du hast schon ein Ticket: {existing_channel.mention}",
+                ephemeral=True
+            )
+            return
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            guild.me: discord.PermissionOverwrite(
+                read_messages=True,
+                send_messages=True,
+                manage_channels=True
+            )
+        }
+
+        channel = await guild.create_text_channel(
+            name=ticket_name,
+            category=category,
+            overwrites=overwrites
+        )
+
+        await channel.send(
+            f"{user.mention} willkommen in deinem Ticket.\n"
+            f"Ein Moderator wird sich bald kümmern.\n\n"
+            f"Zum Schließen: `/close_ticket`"
+        )
+
+        await interaction.response.send_message(
+            f"Dein Ticket wurde erstellt: {channel.mention}",
+            ephemeral=True
+        )
+
+
 @bot.event
 async def on_ready():
     init_db()
+    bot.add_view(TicketView())
     await tree.sync()
     print(f"Eingeloggt als {bot.user}")
 
@@ -80,18 +145,23 @@ async def on_ready():
 @bot.event
 async def on_member_join(member: discord.Member):
     settings = get_guild_settings(member.guild.id)
-    if not settings:
-        return
+    if settings:
+        welcome_channel_id, welcome_message, _premium = settings
 
-    welcome_channel_id, welcome_message, _premium = settings
+        if welcome_channel_id and welcome_message:
+            channel = member.guild.get_channel(welcome_channel_id)
+            if channel:
+                msg = welcome_message.replace("{user}", member.mention).replace("{server}", member.guild.name)
+                await channel.send(msg)
 
-    if not welcome_channel_id or not welcome_message:
-        return
+    role_name = "Mitglied"
+    role = discord.utils.get(member.guild.roles, name=role_name)
 
-    channel = member.guild.get_channel(welcome_channel_id)
-    if channel:
-        msg = welcome_message.replace("{user}", member.mention).replace("{server}", member.guild.name)
-        await channel.send(msg)
+    if role:
+        await member.add_roles(role)
+        print(f"{member} hat die Rolle {role_name} bekommen")
+    else:
+        print("Rolle nicht gefunden!")
 
 
 @tree.command(name="setup_welcome", description="Setzt den Willkommenskanal und die Nachricht.")
@@ -102,7 +172,10 @@ async def setup_welcome(
     message: str
 ):
     if interaction.guild is None:
-        await interaction.response.send_message("Dieser Befehl funktioniert nur in einem Server.", ephemeral=True)
+        await interaction.response.send_message(
+            "Dieser Befehl funktioniert nur in einem Server.",
+            ephemeral=True
+        )
         return
 
     set_welcome(interaction.guild.id, channel.id, message)
@@ -115,7 +188,10 @@ async def setup_welcome(
 @tree.command(name="premium_status", description="Zeigt den Premium-Status dieses Servers.")
 async def premium_status(interaction: discord.Interaction):
     if interaction.guild is None:
-        await interaction.response.send_message("Dieser Befehl funktioniert nur in einem Server.", ephemeral=True)
+        await interaction.response.send_message(
+            "Dieser Befehl funktioniert nur in einem Server.",
+            ephemeral=True
+        )
         return
 
     premium = is_premium(interaction.guild.id)
@@ -127,7 +203,10 @@ async def premium_status(interaction: discord.Interaction):
 @app_commands.checks.has_permissions(manage_guild=True)
 async def announce(interaction: discord.Interaction, text: str):
     if interaction.guild is None:
-        await interaction.response.send_message("Dieser Befehl funktioniert nur in einem Server.", ephemeral=True)
+        await interaction.response.send_message(
+            "Dieser Befehl funktioniert nur in einem Server.",
+            ephemeral=True
+        )
         return
 
     if not is_premium(interaction.guild.id):
@@ -143,6 +222,150 @@ async def announce(interaction: discord.Interaction, text: str):
 
     await interaction.channel.send(f"📢 {text}")
     await interaction.response.send_message("Ankündigung gesendet.", ephemeral=True)
+
+
+@tree.command(name="ticket_panel", description="Erstellt ein Ticket-Panel.")
+@app_commands.checks.has_permissions(administrator=True)
+async def ticket_panel(interaction: discord.Interaction):
+    if interaction.guild is None:
+        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
+        return
+
+    if not is_premium(interaction.guild.id):
+        await interaction.response.send_message(
+            "Das Ticket-System ist nur für Premium-Server verfügbar.",
+            ephemeral=True
+        )
+        return
+
+    if interaction.channel is None:
+        await interaction.response.send_message("Kanal nicht gefunden.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title="Support Tickets",
+        description="Klicke auf den Button unten, um ein Ticket zu erstellen."
+    )
+
+    await interaction.response.send_message("Ticket-Panel wurde erstellt.", ephemeral=True)
+    await interaction.channel.send(embed=embed, view=TicketView())
+
+
+@tree.command(name="close_ticket", description="Schließt das aktuelle Ticket.")
+@app_commands.checks.has_permissions(manage_channels=True)
+async def close_ticket(interaction: discord.Interaction):
+    if interaction.channel is None or interaction.guild is None:
+        await interaction.response.send_message("Das geht hier nicht.", ephemeral=True)
+        return
+
+    if not interaction.channel.name.startswith("ticket-"):
+        await interaction.response.send_message("Das ist kein Ticket-Kanal.", ephemeral=True)
+        return
+
+    await interaction.response.send_message("Ticket wird geschlossen.", ephemeral=True)
+    await interaction.channel.delete()
+
+
+@tree.command(name="kick", description="Kickt einen Benutzer.")
+@app_commands.checks.has_permissions(kick_members=True)
+async def kick_user(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    grund: str = "Kein Grund angegeben"
+):
+    if interaction.guild is None:
+        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
+        return
+
+    await member.kick(reason=grund)
+    await interaction.response.send_message(
+        f"{member.mention} wurde gekickt. Grund: {grund}"
+    )
+
+
+@tree.command(name="ban", description="Bannt einen Benutzer.")
+@app_commands.checks.has_permissions(ban_members=True)
+async def ban_user(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    grund: str = "Kein Grund angegeben"
+):
+    if interaction.guild is None:
+        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
+        return
+
+    await member.ban(reason=grund)
+    await interaction.response.send_message(
+        f"{member.mention} wurde gebannt. Grund: {grund}"
+    )
+
+
+@tree.command(name="clear", description="Löscht eine Anzahl von Nachrichten.")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def clear_messages(
+    interaction: discord.Interaction,
+    anzahl: app_commands.Range[int, 1, 100]
+):
+    if interaction.guild is None:
+        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
+        return
+
+    if not is_premium(interaction.guild.id):
+        await interaction.response.send_message(
+            "Diese Funktion ist nur für Premium-Server verfügbar.",
+            ephemeral=True
+        )
+        return
+
+    if interaction.channel is None:
+        await interaction.response.send_message("Kanal nicht gefunden.", ephemeral=True)
+        return
+
+    await interaction.response.send_message(
+        f"Lösche {anzahl} Nachrichten...",
+        ephemeral=True
+    )
+    await interaction.channel.purge(limit=anzahl)
+
+
+@tree.command(name="premium_on", description="Aktiviert Premium für diesen Server.")
+@app_commands.checks.has_permissions(administrator=True)
+async def premium_on(interaction: discord.Interaction):
+    if interaction.guild is None:
+        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
+        return
+
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO guild_settings (guild_id, premium_enabled)
+        VALUES (?, 1)
+        ON CONFLICT(guild_id) DO UPDATE SET premium_enabled=1
+    """, (interaction.guild.id,))
+    conn.commit()
+    conn.close()
+
+    await interaction.response.send_message("Premium wurde aktiviert.", ephemeral=True)
+
+
+@tree.command(name="premium_off", description="Deaktiviert Premium für diesen Server.")
+@app_commands.checks.has_permissions(administrator=True)
+async def premium_off(interaction: discord.Interaction):
+    if interaction.guild is None:
+        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
+        return
+
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO guild_settings (guild_id, premium_enabled)
+        VALUES (?, 0)
+        ON CONFLICT(guild_id) DO UPDATE SET premium_enabled=0
+    """, (interaction.guild.id,))
+    conn.commit()
+    conn.close()
+
+    await interaction.response.send_message("Premium wurde deaktiviert.", ephemeral=True)
 
 
 @setup_welcome.error
@@ -165,217 +388,5 @@ async def announce_error(interaction: discord.Interaction, error):
 
 if not TOKEN:
     raise ValueError("DISCORD_TOKEN ist nicht gesetzt.")
-@bot.event
-async def on_member_join(member):
-    role_name = "Mitglied"
 
-    role = discord.utils.get(member.guild.roles, name=role_name)
-
-    if role:
-        await member.add_roles(role)
-        print(f"{member} hat die Rolle {role_name} bekommen")
-    else:
-        print("Rolle nicht gefunden!")
-class TicketView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="Ticket erstellen", style=discord.ButtonStyle.green, custom_id="create_ticket")
-    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.guild is None:
-            await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
-            return
-
-        guild = interaction.guild
-        user = interaction.user
-
-        category = discord.utils.get(guild.categories, name="Tickets")
-        if category is None:
-            category = await guild.create_category("Tickets")
-
-        existing_channel = discord.utils.get(guild.text_channels, name=f"ticket-{user.name.lower()}")
-        if existing_channel:
-            await interaction.response.send_message(
-                f"Du hast schon ein Ticket: {existing_channel.mention}",
-                ephemeral=True
-            )
-            return
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
-        }
-
-        channel = await guild.create_text_channel(
-            name=f"ticket-{user.name.lower()}",
-            category=category,
-            overwrites=overwrites
-        )
-
-        await channel.send(
-            f"{user.mention} willkommen in deinem Ticket.\n"
-            f"Ein Moderator wird sich bald kümmern.\n\n"
-            f"Zum Schließen: `/close_ticket`"
-        )
-
-        await interaction.response.send_message(
-            f"Dein Ticket wurde erstellt: {channel.mention}",
-            ephemeral=True
-        )
-
-
-@tree.command(name="ticket_panel", description="Erstellt ein Ticket-Panel.")
-@app_commands.checks.has_permissions(administrator=True)
-async def ticket_panel(interaction: discord.Interaction):
-    if interaction.guild is None:
-        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
-        return
-
-    if not is_premium(interaction.guild.id):
-        await interaction.response.send_message(
-            "Das Ticket-System ist nur für Premium-Server verfügbar.",
-            ephemeral=True
-        )
-        return
-
-    embed = discord.Embed(
-        title="Support Tickets",
-        description="Klicke auf den Button unten, um ein Ticket zu erstellen.",
-    )
-    await interaction.response.send_message("Ticket-Panel wurde erstellt.", ephemeral=True)
-    await interaction.channel.send(embed=embed, view=TicketView())
-
-
-@tree.command(name="close_ticket", description="Schließt das aktuelle Ticket.")
-@app_commands.checks.has_permissions(manage_channels=True)
-async def close_ticket(interaction: discord.Interaction):
-    if interaction.channel is None or interaction.guild is None:
-        await interaction.response.send_message("Das geht hier nicht.", ephemeral=True)
-        return
-
-    if not interaction.channel.name.startswith("ticket-"):
-        await interaction.response.send_message("Das ist kein Ticket-Kanal.", ephemeral=True)
-        return
-
-    await interaction.response.send_message("Ticket wird geschlossen.", ephemeral=True)
-    await interaction.channel.delete()
-@tree.command(name="kick", description="Kickt einen Benutzer.")
-@app_commands.checks.has_permissions(kick_members=True)
-async def kick_user(interaction: discord.Interaction, member: discord.Member, grund: str = "Kein Grund angegeben"):
-    if interaction.guild is None:
-        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
-        return
-
-    await member.kick(reason=grund)
-    await interaction.response.send_message(f"{member.mention} wurde gekickt. Grund: {grund}")
-
-
-@tree.command(name="ban", description="Bannt einen Benutzer.")
-@app_commands.checks.has_permissions(ban_members=True)
-async def ban_user(interaction: discord.Interaction, member: discord.Member, grund: str = "Kein Grund angegeben"):
-    if interaction.guild is None:
-        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
-        return
-
-    await member.ban(reason=grund)
-    await interaction.response.send_message(f"{member.mention} wurde gebannt. Grund: {grund}")
-
-
-@tree.command(name="clear", description="Löscht eine Anzahl von Nachrichten.")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def clear_messages(interaction: discord.Interaction, anzahl: app_commands.Range[int, 1, 100]):
-    if interaction.guild is None:
-        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
-        return
-
-    if not is_premium(interaction.guild.id):
-        await interaction.response.send_message(
-            "Diese Funktion ist nur für Premium-Server verfügbar.",
-            ephemeral=True
-        )
-        return
-
-    if interaction.channel is None:
-        await interaction.response.send_message("Kanal nicht gefunden.", ephemeral=True)
-        return
-
-    await interaction.response.send_message(f"Lösche {anzahl} Nachrichten...", ephemeral=True)
-    await interaction.channel.purge(limit=anzahl)
-    @tree.command(name="premium_on", description="Aktiviert Premium für diesen Server.")
-@app_commands.checks.has_permissions(administrator=True)
-async def premium_on(interaction: discord.Interaction):
-    if interaction.guild is None:
-        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
-        return
-
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO guild_settings (guild_id, premium_enabled)
-        VALUES (?, 1)
-        ON CONFLICT(guild_id) DO UPDATE SET premium_enabled=1
-    """, (interaction.guild.id,))
-    conn.commit()
-    conn.close()
-
-    await interaction.response.send_message("Premium wurde aktiviert.", ephemeral=True)
-
-
-@tree.command(name="premium_off", description="Deaktiviert Premium für diesen Server.")
-@app_commands.checks.has_permissions(administrator=True)
-async def premium_off(interaction: discord.Interaction):
-    if interaction.guild is None:
-        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
-        return
-
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO guild_settings (guild_id, premium_enabled)
-        VALUES (?, 0)
-        ON CONFLICT(guild_id) DO UPDATE SET premium_enabled=0
-    """, (interaction.guild.id,))
-    conn.commit()
-    conn.close()
-
-    await interaction.response.send_message("Premium wurde deaktiviert.", ephemeral=True)
-    @tree.command(name="premium_on", description="Aktiviert Premium für diesen Server.")
-@app_commands.checks.has_permissions(administrator=True)
-async def premium_on(interaction: discord.Interaction):
-    if interaction.guild is None:
-        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
-        return
-
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO guild_settings (guild_id, premium_enabled)
-        VALUES (?, 1)
-        ON CONFLICT(guild_id) DO UPDATE SET premium_enabled=1
-    """, (interaction.guild.id,))
-    conn.commit()
-    conn.close()
-
-    await interaction.response.send_message("Premium wurde aktiviert.", ephemeral=True)
-
-
-@tree.command(name="premium_off", description="Deaktiviert Premium für diesen Server.")
-@app_commands.checks.has_permissions(administrator=True)
-async def premium_off(interaction: discord.Interaction):
-    if interaction.guild is None:
-        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
-        return
-
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO guild_settings (guild_id, premium_enabled)
-        VALUES (?, 0)
-        ON CONFLICT(guild_id) DO UPDATE SET premium_enabled=0
-    """, (interaction.guild.id,))
-    conn.commit()
-    conn.close()
-
-    await interaction.response.send_message("Premium wurde deaktiviert.", ephemeral=True)
 bot.run(TOKEN)
