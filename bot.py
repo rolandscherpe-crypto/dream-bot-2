@@ -249,4 +249,35 @@ async def close_ticket(interaction: discord.Interaction):
 
     await interaction.response.send_message("Ticket wird geschlossen.", ephemeral=True)
     await interaction.channel.delete()
+    @tree.command(name="kick", description="Kickt einen Benutzer.")
+@app_commands.checks.has_permissions(kick_members=True)
+async def kick_user(interaction: discord.Interaction, member: discord.Member, grund: str = "Kein Grund angegeben"):
+    if interaction.guild is None:
+        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
+        return
+
+    await member.kick(reason=grund)
+    await interaction.response.send_message(f"{member.mention} wurde gekickt. Grund: {grund}")
+
+
+@tree.command(name="ban", description="Bannt einen Benutzer.")
+@app_commands.checks.has_permissions(ban_members=True)
+async def ban_user(interaction: discord.Interaction, member: discord.Member, grund: str = "Kein Grund angegeben"):
+    if interaction.guild is None:
+        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
+        return
+
+    await member.ban(reason=grund)
+    await interaction.response.send_message(f"{member.mention} wurde gebannt. Grund: {grund}")
+
+
+@tree.command(name="clear", description="Löscht eine Anzahl von Nachrichten.")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def clear_messages(interaction: discord.Interaction, anzahl: app_commands.Range[int, 1, 100]):
+    if interaction.channel is None:
+        await interaction.response.send_message("Kanal nicht gefunden.", ephemeral=True)
+        return
+
+    await interaction.response.send_message(f"Lösche {anzahl} Nachrichten...", ephemeral=True)
+    await interaction.channel.purge(limit=anzahl)
 bot.run(TOKEN)
