@@ -176,4 +176,77 @@ async def on_member_join(member):
         print(f"{member} hat die Rolle {role_name} bekommen")
     else:
         print("Rolle nicht gefunden!")
+class TicketView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Ticket erstellen", style=discord.ButtonStyle.green, custom_id="create_ticket")
+    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.guild is None:
+            await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
+            return
+
+        guild = interaction.guild
+        user = interaction.user
+
+        category = discord.utils.get(guild.categories, name="Tickets")
+        if category is None:
+            category = await guild.create_category("Tickets")
+
+        existing_channel = discord.utils.get(guild.text_channels, name=f"ticket-{user.name.lower()}")
+        if existing_channel:
+            await interaction.response.send_message(
+                f"Du hast schon ein Ticket: {existing_channel.mention}",
+                ephemeral=True
+            )
+            return
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
+        }
+
+        channel = await guild.create_text_channel(
+            name=f"ticket-{user.name.lower()}",
+            category=category,
+            overwrites=overwrites
+        )
+
+        await channel.send(
+            f"{user.mention} willkommen in deinem Ticket.\n"
+            f"Ein Moderator wird sich bald kümmern.\n\n"
+            f"Zum Schließen: `/close_ticket`"
+        )
+
+        await interaction.response.send_message(
+            f"Dein Ticket wurde erstellt: {channel.mention}",
+            ephemeral=True
+        )
+
+
+@tree.command(name="ticket_panel", description="Erstellt ein Ticket-Panel.")
+@app_commands.checks.has_permissions(administrator=True)
+async def ticket_panel(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="Support Tickets",
+        description="Klicke auf den Button unten, um ein Ticket zu erstellen.",
+    )
+    await interaction.response.send_message("Ticket-Panel wurde erstellt.", ephemeral=True)
+    await interaction.channel.send(embed=embed, view=TicketView())
+
+
+@tree.command(name="close_ticket", description="Schließt das aktuelle Ticket.")
+@app_commands.checks.has_permissions(manage_channels=True)
+async def close_ticket(interaction: discord.Interaction):
+    if interaction.channel is None or interaction.guild is None:
+        await interaction.response.send_message("Das geht hier nicht.", ephemeral=True)
+        return
+
+    if not interaction.channel.name.startswith("ticket-"):
+        await interaction.response.send_message("Das ist kein Ticket-Kanal.", ephemeral=True)
+        return
+
+    await interaction.response.send_message("Ticket wird geschlossen.", ephemeral=True)
+    await interaction.channel.delete()
 bot.run(TOKEN)
