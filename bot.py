@@ -228,6 +228,17 @@ class TicketView(discord.ui.View):
 @tree.command(name="ticket_panel", description="Erstellt ein Ticket-Panel.")
 @app_commands.checks.has_permissions(administrator=True)
 async def ticket_panel(interaction: discord.Interaction):
+    if interaction.guild is None:
+        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
+        return
+
+    if not is_premium(interaction.guild.id):
+        await interaction.response.send_message(
+            "Das Ticket-System ist nur für Premium-Server verfügbar.",
+            ephemeral=True
+        )
+        return
+
     embed = discord.Embed(
         title="Support Tickets",
         description="Klicke auf den Button unten, um ein Ticket zu erstellen.",
