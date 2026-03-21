@@ -274,6 +274,17 @@ async def ban_user(interaction: discord.Interaction, member: discord.Member, gru
 @tree.command(name="clear", description="Löscht eine Anzahl von Nachrichten.")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def clear_messages(interaction: discord.Interaction, anzahl: app_commands.Range[int, 1, 100]):
+    if interaction.guild is None:
+        await interaction.response.send_message("Das geht nur in einem Server.", ephemeral=True)
+        return
+
+    if not is_premium(interaction.guild.id):
+        await interaction.response.send_message(
+            "Diese Funktion ist nur für Premium-Server verfügbar.",
+            ephemeral=True
+        )
+        return
+
     if interaction.channel is None:
         await interaction.response.send_message("Kanal nicht gefunden.", ephemeral=True)
         return
